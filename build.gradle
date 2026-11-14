@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+}
+
+group = project.maven_group
+version = project.plugin_version
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/' }
+    maven { url = 'https://repo.extendedclip.com/content/repositories/placeholderapi/' }
+}
+
+// Bootstrap, jar'daki gömülü kütüphaneleri (axapi, lamp, triumph-gui, bstats, adventure...) buraya ayırır
+def bundledLibs = file("libs/bundled-libs.jar")
+
+dependencies {
+    compileOnly "org.spigotmc:spigot-api:${project.spigot_api_version}"
+    compileOnly "me.clip:placeholderapi:${project.placeholderapi_version}"
+    compileOnly "net.kyori:adventure-text-minimessage:${project.minimessage_version}"
+    compileOnly "com.h2database:h2:${project.h2_version}"
+    compileOnly "org.slf4j:slf4j-api:${project.slf4j_version}"
+
+    if (bundledLibs.exists()) {
+        compileOnly files(bundledLibs)
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.toVersion(project.java_version)
+    targetCompatibility = JavaVersion.toVersion(project.java_version)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release = Integer.parseInt(project.java_version)
+    options.warnings = false
+    options.compilerArgs += ["-Xmaxerrs", "2000"]
+}
+
+processResources {
+    filteringCharset = "UTF-8"
+}
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    if (bundledLibs.exists()) {
+        from({ zipTree(bundledLibs) }) {
+            exclude "META-INF/MANIFEST.MF", "META-INF/INDEX.LIST", "META-INF/*.SF", "META-INF/*.RSA", "META-INF/*.DSA"
+        }
+    }
+
+    manifest {
+        attributes "Implementation-Version": project.version
+    }
+}

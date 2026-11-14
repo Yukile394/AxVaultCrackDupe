@@ -1,0 +1,126 @@
+name: Bootstrap (decompile)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "src/main/java doluysa üzerine yaz (ELLE YAPTIĞIN DÜZENLEMELERİ SİLER)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    env:
+      JAR: original/AxVaults.jar
+      EXPECTED_JAR_SIZE: "4053764"
+      FORCE: ${{ inputs.force }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Jar kontrol
+        run: |
+          set -euo pipefail
+          test -f "$JAR" || { echo "::error::$JAR yok. Jar'ı AxVaults.jar adıyla original/ klasörüne yükle."; exit 1; }
+          size="$(stat -c%s "$JAR")"
+          echo "Boyut (bayt): $size (beklenen: $EXPECTED_JAR_SIZE)"
+          if ! unzip -tq "$JAR" >/dev/null 2>&1; then
+            echo "::error::$JAR geçerli bir jar/zip değil. GitHub web'de yeniden adlandırılmış olabilir; telefonda adını değiştirip tekrar yükle."
+            exit 1
+          fi
+          if [ "$size" != "$EXPECTED_JAR_SIZE" ]; then
+            echo "::warning::Jar boyutu beklenenden farklı ($size != $EXPECTED_JAR_SIZE). Farklı sürüm yüklediysen sorun değil; bozulduysa yeniden yükle."
+          fi
+          unzip -l "$JAR" | grep -q ' plugin.yml$' || { echo "::error::Jar içinde plugin.yml yok."; exit 1; }
+          echo "Jar geçerli."
+
+      - name: Elle düzenleme kontrolü
+        run: |
+          set -euo pipefail
+          if [ -d src/main/java ] && [ -n "$(find src/main/java -name '*.java' -print -quit)" ]; then
+            manual="$(git log --format='%h %s' -- src/main/java | grep -v ' bootstrap:' || true)"
+            if [ "$FORCE" != "true" ]; then
+              echo "::error::src/main/java dolu. Tekrar çalıştırmak src/main/java'yı siler; gerçekten istiyorsan 'force' kutusunu işaretle."
+              if [ -n "$manual" ]; then
+                echo "::warning::Elle düzenleme commit'leri var, force bunları siler:"
+                echo "$manual"
+              fi
+              exit 1
+            fi
+            echo "::warning::force açık: src/main/java silinip yeniden üretilecek."
+            if [ -n "$manual" ]; then
+              echo "::warning::Şu commit'lerdeki elle düzenlemeler kaybolacak:"
+              echo "$manual"
+            fi
+          fi
+
+      - name: Wrapper kontrol
+        id: wrapcheck
+        run: |
+          if [ -f gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ] && [ -f gradle/wrapper/gradle-wrapper.properties ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+            echo "Wrapper tamam."
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "Wrapper eksik, üretilecek."
+          fi
+
+      - name: Gradle kur (wrapper üretmek için)
+        if: steps.wrapcheck.outputs.missing == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.8"
+
+      - name: Wrapper üret
+        if: steps.wrapcheck.outputs.missing == 'true'
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          echo "rootProject.name = 'wrapper-tmp'" > "$tmp/settings.gradle"
+          (cd "$tmp" && gradle wrapper --gradle-version 8.8 --distribution-type bin --no-daemon)
+          mkdir -p gradle/wrapper
+          cp "$tmp/gradlew" "$tmp/gradlew.bat" .
+          cp "$tmp/gradle/wrapper/gradle-wrapper.jar" "$tmp/gradle/wrapper/gradle-wrapper.properties" gradle/wrapper/
+          rm -rf "$tmp"
+
+      - name: Decompile
+        run: |
+          set -euo pipefail
+          args=(--jar "$JAR" --root . \
+            --project-prefix com/artillexstudios/axvaults/ \
+            --exclude-prefix com/artillexstudios/axvaults/libs/)
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          python3 tools/decompile.py "${args[@]}"
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git update-index --chmod=+x gradlew
+          if git diff --cached --quiet; then
+            echo "değişiklik yok"
+          else
+            git commit -m "bootstrap: decompiled sources"
+            git push
+          fi

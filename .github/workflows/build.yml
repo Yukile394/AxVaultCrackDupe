@@ -1,0 +1,135 @@
+name: Build
+
+on:
+  push:
+    paths-ignore:
+      - "original/**"
+      - "**.md"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Hazır mı kontrol et
+        id: ready
+        run: |
+          if [ -n "$(find src/main/java -name '*.java' -print -quit 2>/dev/null)" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "hazir"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::src/main/java boş. Önce Bootstrap workflow'unu çalıştır."
+            exit 1
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::src/main/java boş, build atlandı. Önce Bootstrap workflow'unu çalıştır."
+          fi
+
+      - name: Build
+        if: steps.ready.outputs.ready == 'true'
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew build --no-daemon --console=plain 2>&1 | tee build.log
+
+      - name: Hata özeti
+        if: failure() && steps.ready.outputs.ready == 'true'
+        run: |
+          python3 - <<'PY'
+          import collections, pathlib, re
+
+          path = pathlib.Path("build.log")
+          lines = path.read_text(errors="replace").splitlines() if path.exists() else []
+          err_re = re.compile(r"^(.*?\.java):(\d+): error: (.*)$")
+          errors = []
+          for i, line in enumerate(lines):
+              m = err_re.match(line)
+              if not m:
+                  continue
+              file, num, msg = m.groups()
+              file = file.split("src/main/java/")[-1]
+              code = lines[i + 1].strip() if i + 1 < len(lines) else ""
+              extra = ""
+              for j in range(i + 2, min(i + 6, len(lines))):
+                  if err_re.match(lines[j]):
+                      break
+                  s = lines[j].strip()
+                  if s.startswith("symbol:"):
+                      extra = s
+                      break
+              errors.append((file, num, msg, code, extra))
+
+          print("===== HATA SAYISI =====")
+          print(len(errors))
+          if not errors:
+              print("javac hatası yok. Gradle çıktısından ilgili bölüm:")
+              out, on = [], False
+              for line in lines:
+                  if line.startswith("* What went wrong"):
+                      on = True
+                  elif line.startswith("* Try"):
+                      on = False
+                  if on:
+                      out.append(line)
+              print("\n".join(out[:40]) or "(What went wrong bölümü bulunamadı, build.log'un sonuna bak)")
+          else:
+              print("===== HATA TÜRLERİ (sayı, mesaj) =====")
+              kinds = collections.Counter(
+                  (m + (" [" + x + "]" if x else "")) for _, _, m, _, x in errors
+              )
+              for msg, n in kinds.most_common(40):
+                  print(f"{n:5d}  {msg}")
+              print("===== HATALAR (dosya:satır + kod) =====")
+              limit = 200
+              for file, num, msg, code, extra in errors[:limit]:
+                  print(f"{file}:{num}: {msg}")
+                  print(f"    {code}")
+                  if extra:
+                      print(f"    {extra}")
+              if len(errors) > limit:
+                  print(f"... {len(errors) - limit} hata daha var (ilk {limit} gösterildi)")
+          PY
+
+      - name: Çıktı jar'ını seç
+        id: pick
+        if: steps.ready.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          jar="$(ls build/libs/*.jar | grep -v -e '-sources.jar' -e '-javadoc.jar' | head -n 1)"
+          echo "jar=$jar" >> "$GITHUB_OUTPUT"
+          echo "Jar: $jar"
+
+      - name: Artifact yükle
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AxVaults
+          path: ${{ steps.pick.outputs.jar }}
+          if-no-files-found: error
+
+      - name: Release oluştur
+        if: steps.ready.outputs.ready == 'true' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(grep '^plugin_version=' gradle.properties | cut -d= -f2)"
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" "${{ steps.pick.outputs.jar }}" \
+            --target "$GITHUB_SHA" \
+            --title "AxVaults ${version} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Otomatik build. Commit: ${GITHUB_SHA}" \
+            --prerelease
