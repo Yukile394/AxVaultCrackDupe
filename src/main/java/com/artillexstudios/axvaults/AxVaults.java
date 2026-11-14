@@ -133,7 +133,7 @@ public final class AxVaults extends AxPlugin {
       }
 
       for (Vault vault : VaultManager.getVaults()) {
-         for (HumanEntity humanEntity : new ArrayList(vault.getInventory().getViewers())) {
+         for (HumanEntity humanEntity : new ArrayList<>(vault.getInventory().getViewers())) {
             humanEntity.closeInventory();
          }
       }
