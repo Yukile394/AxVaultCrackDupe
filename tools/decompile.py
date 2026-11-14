@@ -6,7 +6,8 @@ Verilen jar içinden:
   1. --project-prefix altındaki (ve --exclude-prefix dışındaki) sınıfları Vineflower ile decompile eder,
   2. plugin.yml, config.yml, messages.yml gibi proje resource'larını src/main/resources'a çıkarır,
   3. gömülü (shade edilmiş / relocate edilmiş) kütüphaneleri libs/bundled-libs.jar olarak ayırır,
-  4. Vineflower'ın bozduğu kalıpları (invokedynamic string birleştirme, boolean/int sayaç) düzeltir,
+  4. Vineflower'ın bozduğu kalıpları (invokedynamic string birleştirme, boolean/int sayaç,
+     ham koleksiyonlu for-each) düzeltir,
   5. DECOMPILE_REPORT.md yazar.
 
 Kullanım:
@@ -141,6 +142,16 @@ def fix_bool_int(text: str) -> str:
         text = re.sub(rf"(\b{n} = )false;", r"\g<1>0;", text)
         text = re.sub(rf"(\b{n} = )true;", r"\g<1>1;", text)
     return text
+
+
+RAW_FOREACH = re.compile(
+    r"(for \([^:;{}]+? \w+ : new (?:ArrayList|LinkedList|HashSet|LinkedHashSet|ArrayDeque|TreeSet))\("
+)
+
+
+def fix_raw_foreach(text: str) -> str:
+    """for (T x : new ArrayList(c)) -> new ArrayList<>(c): ham koleksiyon Object döndürür."""
+    return RAW_FOREACH.sub(lambda m: m.group(1) + "<>(", text)
 
 
 def fix_duck_casts(text: str) -> str:
@@ -343,6 +354,7 @@ def main() -> int:
                 failed.append(rel.as_posix())
             text = fix_indy_concat(text)
             text = fix_bool_int(text)
+            text = fix_raw_foreach(text)
             if args.legacy_fixes:
                 text = fix_duck_casts(text)
                 text = fix_getvalue_cond(text)
