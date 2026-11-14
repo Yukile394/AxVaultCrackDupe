@@ -1,0 +1,133 @@
+package com.artillexstudios.axvaults.guis;
+
+import com.artillexstudios.axvaults.AxVaults;
+import com.artillexstudios.axvaults.libs.axapi.libs.boostedyaml.block.implementation.Section;
+import com.artillexstudios.axvaults.libs.axapi.reflection.ClassUtils;
+import com.artillexstudios.axvaults.libs.axapi.utils.Cooldown;
+import com.artillexstudios.axvaults.libs.axapi.utils.ItemBuilder;
+import com.artillexstudios.axvaults.libs.axapi.utils.StringUtils;
+import com.artillexstudios.axvaults.libs.gui.guis.Gui;
+import com.artillexstudios.axvaults.libs.gui.guis.GuiItem;
+import com.artillexstudios.axvaults.libs.gui.guis.PaginatedGui;
+import com.artillexstudios.axvaults.utils.SoundUtils;
+import com.artillexstudios.axvaults.utils.ThreadUtils;
+import com.artillexstudios.axvaults.vaults.Vault;
+import com.artillexstudios.axvaults.vaults.VaultPlayer;
+import java.util.Objects;
+import me.clip.placeholderapi.PlaceholderAPI;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemFlag;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.jetbrains.annotations.NotNull;
+
+public class ItemPicker {
+   private static final Cooldown<Player> cooldown = Cooldown.createSynchronized();
+   private final Player player;
+   private final VaultPlayer vaultPlayer;
+
+   public ItemPicker(Player player, VaultPlayer vaultPlayer) {
+      this.player = player;
+      this.vaultPlayer = vaultPlayer;
+   }
+
+   public void open(@NotNull Vault vault) {
+      this.open(vault, 1, 1);
+   }
+
+   public void open(@NotNull Vault vault, int oldPage, int cPage) {
+      int rows = AxVaults.CONFIG.getInt("item-picker-rows", 6);
+      int pageSize = rows * 9 - 9;
+      String title = AxVaults.MESSAGES.getString("guis.item-picker.title");
+      if (ClassUtils.INSTANCE.classExists("me.clip.placeholderapi.PlaceholderAPI")) {
+         title = PlaceholderAPI.setPlaceholders(this.player, title);
+      }
+
+      PaginatedGui gui = Gui.paginated().title(StringUtils.format(title)).rows(rows).pageSize(pageSize).disableAllInteractions().create();
+
+      for (Material material : Material.values()) {
+         ItemStack it = null;
+
+         try {
+            it = ItemBuilder.create(material).glow(Objects.equals(vault.getIcon(), material)).get();
+         } catch (Exception var15) {
+         }
+
+         if (it != null) {
+            ItemMeta meta = it.hasItemMeta() ? it.getItemMeta() : Bukkit.getItemFactory().getItemMeta(it.getType());
+            if (meta != null) {
+               meta.addItemFlags(new ItemFlag[]{ItemFlag.HIDE_ATTRIBUTES});
+               it.setItemMeta(meta);
+               GuiItem guiItem = new GuiItem(it);
+               guiItem.setAction(event -> {
+                  if (!getOrAddCooldown((Player)event.getWhoClicked())) {
+                     if (vault.getIcon().equals(material)) {
+                        vault.setIcon(null);
+                     } else {
+                        vault.setIcon(material);
+                     }
+
+                     SoundUtils.playSound(this.player, AxVaults.MESSAGES.getString("sounds.select-icon"));
+                     if (AxVaults.CONFIG.getBoolean("selector-stay-open", true)) {
+                        this.open(vault, oldPage, gui.getCurrentPageNum());
+                     } else {
+                        new VaultSelector(this.player, this.vaultPlayer).open(oldPage);
+                     }
+                  }
+               });
+               gui.addItem(guiItem);
+            }
+         }
+      }
+
+      Section prev;
+      if ((prev = AxVaults.MESSAGES.getSection("gui-items.previous-page")) != null) {
+         GuiItem item1 = new GuiItem(ItemBuilder.create(prev).get());
+         item1.setAction(event -> {
+            if (!getOrAddCooldown((Player)event.getWhoClicked())) {
+               gui.previous();
+            }
+         });
+         gui.setItem(rows, 3, item1);
+      }
+
+      Section next;
+      if ((next = AxVaults.MESSAGES.getSection("gui-items.next-page")) != null) {
+         GuiItem item2 = new GuiItem(ItemBuilder.create(next).get());
+         item2.setAction(event -> {
+            if (!getOrAddCooldown((Player)event.getWhoClicked())) {
+               gui.next();
+            }
+         });
+         gui.setItem(rows, 7, item2);
+      }
+
+      Section back;
+      if ((back = AxVaults.MESSAGES.getSection("gui-items.back")) != null) {
+         GuiItem item3 = new GuiItem(ItemBuilder.create(back).get());
+         item3.setAction(event -> {
+            if (!getOrAddCooldown((Player)event.getWhoClicked())) {
+               new VaultSelector(this.player, this.vaultPlayer).open(oldPage);
+            }
+         });
+         gui.setItem(rows, 5, item3);
+      }
+
+      ThreadUtils.runSync(this.player, () -> gui.open(this.player, cPage));
+   }
+
+   private static boolean getOrAddCooldown(Player player) {
+      long cooldownMillis = AxVaults.CONFIG.getLong("gui-refresh-cooldown-milliseconds", 100L);
+      if (cooldownMillis > 0L) {
+         if (cooldown.hasCooldown(player)) {
+            return true;
+         }
+
+         cooldown.addCooldown(player, cooldownMillis);
+      }
+
+      return false;
+   }
+}
