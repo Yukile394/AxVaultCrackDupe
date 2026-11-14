@@ -18,12 +18,20 @@ repositories {
 // Bootstrap, jar'daki gömülü kütüphaneleri (axapi, lamp, triumph-gui, bstats, adventure...) buraya ayırır
 def bundledLibs = file("libs/bundled-libs.jar")
 
+// Derleme için stub'lar (jar'a girmez): çalışırken yüklenen relocate edilmiş HikariCP
+sourceSets {
+    stubs {
+        java.setSrcDirs(['stubs/java'])
+    }
+}
+
 dependencies {
     compileOnly "org.spigotmc:spigot-api:${project.spigot_api_version}"
     compileOnly "me.clip:placeholderapi:${project.placeholderapi_version}"
     compileOnly "net.kyori:adventure-text-minimessage:${project.minimessage_version}"
     compileOnly "com.h2database:h2:${project.h2_version}"
     compileOnly "org.slf4j:slf4j-api:${project.slf4j_version}"
+    compileOnly sourceSets.stubs.output
 
     if (bundledLibs.exists()) {
         compileOnly files(bundledLibs)

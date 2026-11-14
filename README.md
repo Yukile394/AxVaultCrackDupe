@@ -38,6 +38,7 @@ Jar'daki `com/artillexstudios/axvaults/libs/**` (axapi, lamp, triumph-gui, bstat
 - Decompile çıktısı orijinal kaynakla birebir aynı olmaz. Bazı dosyalar elle düzeltilmeli; `DECOMPILE_REPORT.md` sorunlu dosyaları listeler.
 - Bootstrap'i tekrar çalıştırmak `src/main/java`'yı siler. Dolu olduğunda **force** olmadan durur; force açıkken elle düzenleme commit'lerini listeleyip uyarır.
 - `src/main/resources` ve `libs/` repoda hazır gelir; Java kaynakları ilk Bootstrap'te üretilir.
+- `stubs/java` altındaki HikariCP stub'ları sadece derleme içindir, jar'a girmez: eklenti HikariCP'yi çalışırken indirip relocate ediyor, jar'da `libs.hikari` paketi yok.
 - PlaceholderAPI gerçek bağımlılık olarak alınır (public Maven deposu), stub gerekmez.
 
 ## Yapı
@@ -48,4 +49,5 @@ tools/decompile.py            ayrıştırma + Vineflower + düzeltmeler
 libs/bundled-libs.jar         gömülü kütüphaneler
 src/main/java                 decompile çıktısı
 src/main/resources            plugin.yml, config.yml, messages.yml
+stubs/java                    derleme-only HikariCP stub'ları
 ```
